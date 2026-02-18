@@ -569,6 +569,83 @@ describe("multi-input connections", () => {
         expect(free).toBe(0);
     });
 
+    test("removeLink removes only the specific link on multi-input slot", () => {
+        var graph = new lg.LGraph();
+        var source1 = lg.LiteGraph.createNode("test/source");
+        var source2 = lg.LiteGraph.createNode("test/source");
+        var target = lg.LiteGraph.createNode("test/target");
+        graph.add(source1);
+        graph.add(source2);
+        graph.add(target);
+
+        target.inputs[0].allow_multiple = true;
+
+        source1.connect(0, target, 0);
+        source2.connect(0, target, 0);
+        expect(target.inputs[0].links.length).toBe(2);
+
+        // Get the link_id for source1's connection
+        var link_id_to_remove = target.inputs[0].links[0];
+        var link_info = graph.links[link_id_to_remove];
+        expect(link_info.origin_id).toBe(source1.id);
+
+        // Remove only source1's link via graph.removeLink
+        graph.removeLink(link_id_to_remove);
+
+        // source2's link should still exist
+        expect(target.inputs[0].links).not.toBeNull();
+        expect(target.inputs[0].links.length).toBe(1);
+        expect(target.getInputNode(0)).toBe(source2);
+
+        // source1's output should be cleaned up
+        expect(source1.outputs[0].links.length).toBe(0);
+        // source2's output should still be connected
+        expect(source2.outputs[0].links.length).toBe(1);
+
+        // The removed link should be gone from graph.links
+        expect(graph.links[link_id_to_remove]).toBeUndefined();
+    });
+
+    test("removeLink fires onConnectionsChange for both sides", () => {
+        var graph = new lg.LGraph();
+        var source1 = lg.LiteGraph.createNode("test/source");
+        var source2 = lg.LiteGraph.createNode("test/source");
+        var target = lg.LiteGraph.createNode("test/target");
+        graph.add(source1);
+        graph.add(source2);
+        graph.add(target);
+
+        target.inputs[0].allow_multiple = true;
+
+        source1.connect(0, target, 0);
+        source2.connect(0, target, 0);
+
+        var link_id_to_remove = target.inputs[0].links[0];
+
+        // Track callbacks
+        var targetCallbacks = [];
+        var sourceCallbacks = [];
+        target.onConnectionsChange = function(type, slot, connected, link_info) {
+            targetCallbacks.push({ type, slot, connected, origin_id: link_info.origin_id });
+        };
+        source1.onConnectionsChange = function(type, slot, connected, link_info) {
+            sourceCallbacks.push({ type, slot, connected });
+        };
+
+        graph.removeLink(link_id_to_remove);
+
+        // Target should get INPUT disconnection callback
+        expect(targetCallbacks.length).toBe(1);
+        expect(targetCallbacks[0].type).toBe(lg.LiteGraph.INPUT);
+        expect(targetCallbacks[0].connected).toBe(false);
+        expect(targetCallbacks[0].origin_id).toBe(source1.id);
+
+        // Source should get OUTPUT disconnection callback
+        expect(sourceCallbacks.length).toBe(1);
+        expect(sourceCallbacks[0].type).toBe(lg.LiteGraph.OUTPUT);
+        expect(sourceCallbacks[0].connected).toBe(false);
+    });
+
     test("computeExecutionOrder counts multi-input links correctly", () => {
         var graph = new lg.LGraph();
         var source1 = lg.LiteGraph.createNode("test/source");

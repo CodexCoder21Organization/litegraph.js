@@ -2172,10 +2172,68 @@
         if (!link) {
             return;
         }
-        var node = this.getNodeById(link.target_id);
-        if (node) {
-            node.disconnectInput(link.target_slot);
+
+        var target_node = this.getNodeById(link.target_id);
+        var origin_node = this.getNodeById(link.origin_id);
+
+        if (!target_node || !origin_node) {
+            return;
         }
+
+        var input = target_node.inputs[link.target_slot];
+        var output = origin_node.outputs[link.origin_slot];
+
+        // Remove from target input's links array
+        if (input && input.links) {
+            var pos = input.links.indexOf(link_id);
+            if (pos !== -1) {
+                input.links.splice(pos, 1);
+            }
+            if (input.links.length === 0) {
+                input.links = null;
+            }
+        }
+
+        // Remove from origin output's links array
+        if (output && output.links) {
+            var pos = output.links.indexOf(link_id);
+            if (pos !== -1) {
+                output.links.splice(pos, 1);
+            }
+        }
+
+        // Remove from graph links pool
+        delete this.links[link_id];
+
+        if (this._version !== undefined) {
+            this._version++;
+        }
+
+        // Fire callbacks
+        if (target_node.onConnectionsChange) {
+            target_node.onConnectionsChange(
+                LiteGraph.INPUT,
+                link.target_slot,
+                false,
+                link,
+                input
+            );
+        }
+        if (origin_node.onConnectionsChange) {
+            origin_node.onConnectionsChange(
+                LiteGraph.OUTPUT,
+                link.origin_slot,
+                false,
+                link,
+                output
+            );
+        }
+        if (this.onNodeConnectionChange) {
+            this.onNodeConnectionChange(LiteGraph.INPUT, target_node, link.target_slot);
+            this.onNodeConnectionChange(LiteGraph.OUTPUT, origin_node, link.origin_slot);
+        }
+        this.setDirtyCanvas(false, true);
+        this.connectionChange(target_node);
     };
 
     //save and recover app state ***************************************
