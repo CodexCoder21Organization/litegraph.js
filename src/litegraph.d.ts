@@ -36,7 +36,11 @@ export interface INodeSlot {
 }
 
 export interface INodeInputSlot extends INodeSlot {
+    links: LLink["id"][] | null;
+    /** @deprecated Use links instead. Backward-compatible getter returning first link. */
     link: LLink["id"] | null;
+    /** When true, multiple connections can be made to this input without disconnecting existing ones */
+    allow_multiple?: boolean;
 }
 export interface INodeOutputSlot extends INodeSlot {
     links: LLink["id"][] | null;
@@ -703,6 +707,12 @@ export declare class LGraphNode {
     getInputLink(slot: number): LLink | null;
     /** returns the node connected in the input slot */
     getInputNode(slot: number): LGraphNode | null;
+    /** returns all nodes connected to an input slot (for allow_multiple inputs) */
+    getInputNodes(slot: number): LGraphNode[];
+    /** returns all LLink objects for an input slot (for allow_multiple inputs) */
+    getInputLinksArray(slot: number): LLink[];
+    /** returns data from all connections on an input slot (for allow_multiple inputs) */
+    getInputDataArray<T = any>(slot: number): T[];
     /** returns the value of an input with this name, otherwise checks if there is a property with that name */
     getInputOrProperty<T = any>(name: string): T;
     /** tells you the last output data that went in that slot */

@@ -224,3 +224,374 @@ describe("unregister node types", () => {
         expect(lg.LiteGraph.registered_node_types["blank/node"]).toBeFalsy();
     })
 });
+
+describe("multi-input connections", () => {
+    let lg;
+    let Source;
+    let Target;
+
+    beforeEach(() => {
+        jest.resetModules();
+        lg = require("./litegraph");
+
+        Source = function Source() {
+            this.addOutput("out", "number");
+        };
+        Source.prototype.onExecute = function () {};
+
+        Target = function Target() {
+            this.addInput("in", "number");
+            this.addOutput("out", "number");
+        };
+        Target.prototype.onExecute = function () {};
+
+        lg.LiteGraph.registerNodeType("test/source", Source);
+        lg.LiteGraph.registerNodeType("test/target", Target);
+    });
+
+    afterEach(() => {
+        jest.restoreAllMocks();
+    });
+
+    test("inputs use links array instead of link", () => {
+        var graph = new lg.LGraph();
+        var node = lg.LiteGraph.createNode("test/target");
+        graph.add(node);
+
+        expect(node.inputs[0].links).toBeNull();
+        expect(node.inputs[0]).not.toHaveProperty("link");
+    });
+
+    test("single connection works with links array", () => {
+        var graph = new lg.LGraph();
+        var source = lg.LiteGraph.createNode("test/source");
+        var target = lg.LiteGraph.createNode("test/target");
+        graph.add(source);
+        graph.add(target);
+
+        source.connect(0, target, 0);
+
+        expect(target.inputs[0].links).not.toBeNull();
+        expect(target.inputs[0].links.length).toBe(1);
+        expect(target.isInputConnected(0)).toBe(true);
+        expect(target.getInputNode(0)).toBe(source);
+    });
+
+    test("single connection replaces existing when allow_multiple is false", () => {
+        var graph = new lg.LGraph();
+        var source1 = lg.LiteGraph.createNode("test/source");
+        var source2 = lg.LiteGraph.createNode("test/source");
+        var target = lg.LiteGraph.createNode("test/target");
+        graph.add(source1);
+        graph.add(source2);
+        graph.add(target);
+
+        source1.connect(0, target, 0);
+        expect(target.inputs[0].links.length).toBe(1);
+        expect(target.getInputNode(0)).toBe(source1);
+
+        // Second connection should replace the first (default behavior)
+        source2.connect(0, target, 0);
+        expect(target.inputs[0].links.length).toBe(1);
+        expect(target.getInputNode(0)).toBe(source2);
+    });
+
+    test("allow_multiple input accepts multiple connections", () => {
+        var graph = new lg.LGraph();
+        var source1 = lg.LiteGraph.createNode("test/source");
+        var source2 = lg.LiteGraph.createNode("test/source");
+        var source3 = lg.LiteGraph.createNode("test/source");
+        var target = lg.LiteGraph.createNode("test/target");
+        graph.add(source1);
+        graph.add(source2);
+        graph.add(source3);
+        graph.add(target);
+
+        // Enable allow_multiple on the input
+        target.inputs[0].allow_multiple = true;
+
+        source1.connect(0, target, 0);
+        source2.connect(0, target, 0);
+        source3.connect(0, target, 0);
+
+        expect(target.inputs[0].links.length).toBe(3);
+        expect(target.isInputConnected(0)).toBe(true);
+
+        // getInputNode returns the first connected node
+        expect(target.getInputNode(0)).toBe(source1);
+
+        // getInputNodes returns all connected nodes
+        var nodes = target.getInputNodes(0);
+        expect(nodes.length).toBe(3);
+        expect(nodes[0]).toBe(source1);
+        expect(nodes[1]).toBe(source2);
+        expect(nodes[2]).toBe(source3);
+    });
+
+    test("allow_multiple prevents duplicate connections from same source", () => {
+        var graph = new lg.LGraph();
+        var source = lg.LiteGraph.createNode("test/source");
+        var target = lg.LiteGraph.createNode("test/target");
+        graph.add(source);
+        graph.add(target);
+
+        target.inputs[0].allow_multiple = true;
+
+        source.connect(0, target, 0);
+        var result = source.connect(0, target, 0);
+
+        // Second connection from same source should be rejected
+        expect(result).toBeNull();
+        expect(target.inputs[0].links.length).toBe(1);
+    });
+
+    test("disconnectInput removes all links on multi-input", () => {
+        var graph = new lg.LGraph();
+        var source1 = lg.LiteGraph.createNode("test/source");
+        var source2 = lg.LiteGraph.createNode("test/source");
+        var target = lg.LiteGraph.createNode("test/target");
+        graph.add(source1);
+        graph.add(source2);
+        graph.add(target);
+
+        target.inputs[0].allow_multiple = true;
+
+        source1.connect(0, target, 0);
+        source2.connect(0, target, 0);
+        expect(target.inputs[0].links.length).toBe(2);
+
+        target.disconnectInput(0);
+
+        expect(target.inputs[0].links).toBeNull();
+        expect(target.isInputConnected(0)).toBe(false);
+
+        // Source outputs should also be cleaned up
+        expect(source1.outputs[0].links.length).toBe(0);
+        expect(source2.outputs[0].links.length).toBe(0);
+    });
+
+    test("disconnectOutput removes link from multi-input", () => {
+        var graph = new lg.LGraph();
+        var source1 = lg.LiteGraph.createNode("test/source");
+        var source2 = lg.LiteGraph.createNode("test/source");
+        var target = lg.LiteGraph.createNode("test/target");
+        graph.add(source1);
+        graph.add(source2);
+        graph.add(target);
+
+        target.inputs[0].allow_multiple = true;
+
+        source1.connect(0, target, 0);
+        source2.connect(0, target, 0);
+        expect(target.inputs[0].links.length).toBe(2);
+
+        // Disconnect just source1's output from target
+        source1.disconnectOutput(0, target);
+
+        expect(target.inputs[0].links.length).toBe(1);
+        expect(target.getInputNode(0)).toBe(source2);
+    });
+
+    test("getInputLinksArray returns all link objects", () => {
+        var graph = new lg.LGraph();
+        var source1 = lg.LiteGraph.createNode("test/source");
+        var source2 = lg.LiteGraph.createNode("test/source");
+        var target = lg.LiteGraph.createNode("test/target");
+        graph.add(source1);
+        graph.add(source2);
+        graph.add(target);
+
+        target.inputs[0].allow_multiple = true;
+
+        source1.connect(0, target, 0);
+        source2.connect(0, target, 0);
+
+        var links = target.getInputLinksArray(0);
+        expect(links.length).toBe(2);
+        expect(links[0].origin_id).toBe(source1.id);
+        expect(links[1].origin_id).toBe(source2.id);
+    });
+
+    test("node removal cleans up multi-input links", () => {
+        var graph = new lg.LGraph();
+        var source1 = lg.LiteGraph.createNode("test/source");
+        var source2 = lg.LiteGraph.createNode("test/source");
+        var target = lg.LiteGraph.createNode("test/target");
+        graph.add(source1);
+        graph.add(source2);
+        graph.add(target);
+
+        target.inputs[0].allow_multiple = true;
+
+        source1.connect(0, target, 0);
+        source2.connect(0, target, 0);
+
+        // Remove source1 - target should still have source2 connected
+        graph.remove(source1);
+
+        expect(target.inputs[0].links.length).toBe(1);
+        expect(target.getInputNode(0)).toBe(source2);
+    });
+
+    test("clone clears multi-input links", () => {
+        var graph = new lg.LGraph();
+        var source1 = lg.LiteGraph.createNode("test/source");
+        var source2 = lg.LiteGraph.createNode("test/source");
+        var target = lg.LiteGraph.createNode("test/target");
+        graph.add(source1);
+        graph.add(source2);
+        graph.add(target);
+
+        target.inputs[0].allow_multiple = true;
+
+        source1.connect(0, target, 0);
+        source2.connect(0, target, 0);
+
+        var cloned = target.clone();
+        expect(cloned.inputs[0].links).toBeNull();
+    });
+
+    test("serialization round-trip preserves multi-input links", () => {
+        var graph = new lg.LGraph();
+        var source1 = lg.LiteGraph.createNode("test/source");
+        var source2 = lg.LiteGraph.createNode("test/source");
+        var target = lg.LiteGraph.createNode("test/target");
+        graph.add(source1);
+        graph.add(source2);
+        graph.add(target);
+
+        target.inputs[0].allow_multiple = true;
+
+        source1.connect(0, target, 0);
+        source2.connect(0, target, 0);
+
+        // Serialize
+        var data = graph.serialize();
+
+        // Verify serialized format uses links array
+        var serialized_target = data.nodes.find(function(n) { return n.type === "test/target"; });
+        expect(serialized_target.inputs[0].links).toBeDefined();
+        expect(serialized_target.inputs[0].links.length).toBe(2);
+
+        // Deserialize into new graph
+        var graph2 = new lg.LGraph();
+        graph2.configure(data);
+
+        var target2 = graph2._nodes.find(function(n) { return n.type === "test/target"; });
+        expect(target2.inputs[0].links.length).toBe(2);
+        expect(target2.isInputConnected(0)).toBe(true);
+    });
+
+    test("old serialization format with link property is migrated", () => {
+        var graph = new lg.LGraph();
+
+        // Simulate old format data
+        var old_data = {
+            last_node_id: 3,
+            last_link_id: 1,
+            nodes: [
+                {
+                    id: 1,
+                    type: "test/source",
+                    pos: [100, 100],
+                    size: [100, 30],
+                    flags: {},
+                    order: 0,
+                    mode: 0,
+                    outputs: [{ name: "out", type: "number", links: [1] }]
+                },
+                {
+                    id: 2,
+                    type: "test/target",
+                    pos: [300, 100],
+                    size: [100, 30],
+                    flags: {},
+                    order: 1,
+                    mode: 0,
+                    inputs: [{ name: "in", type: "number", link: 1 }],
+                    outputs: [{ name: "out", type: "number", links: null }]
+                }
+            ],
+            links: [[1, 1, 0, 2, 0, "number"]],
+            groups: [],
+            config: {},
+            extra: {},
+            version: 0.4
+        };
+
+        graph.configure(old_data);
+
+        var target = graph._nodes.find(function(n) { return n.type === "test/target"; });
+        // Old link property should be migrated to links array
+        expect(target.inputs[0].links).not.toBeNull();
+        expect(target.inputs[0].links.length).toBe(1);
+        expect(target.inputs[0].links[0]).toBe(1);
+        expect(target.isInputConnected(0)).toBe(true);
+    });
+
+    test("addInput with allow_multiple via extra_info", () => {
+        var graph = new lg.LGraph();
+
+        function MultiTarget() {
+            this.addInput("deps", "dependency", { allow_multiple: true });
+            this.addOutput("out", "number");
+        }
+        MultiTarget.prototype.onExecute = function () {};
+        lg.LiteGraph.registerNodeType("test/multi_target", MultiTarget);
+
+        var node = lg.LiteGraph.createNode("test/multi_target");
+        graph.add(node);
+
+        expect(node.inputs[0].allow_multiple).toBe(true);
+        expect(node.inputs[0].links).toBeNull();
+    });
+
+    test("findInputSlotFree considers allow_multiple slots as free", () => {
+        var graph = new lg.LGraph();
+
+        function MultiTarget() {
+            this.addInput("deps", "number", { allow_multiple: true });
+        }
+        MultiTarget.prototype.onExecute = function () {};
+        lg.LiteGraph.registerNodeType("test/multi_target2", MultiTarget);
+
+        var source = lg.LiteGraph.createNode("test/source");
+        var target = lg.LiteGraph.createNode("test/multi_target2");
+        graph.add(source);
+        graph.add(target);
+
+        source.connect(0, target, 0);
+        expect(target.inputs[0].links.length).toBe(1);
+
+        // Even though the slot has a connection, findInputSlotFree should still
+        // return it because allow_multiple is true
+        var free = target.findInputSlotFree();
+        expect(free).toBe(0);
+    });
+
+    test("computeExecutionOrder counts multi-input links correctly", () => {
+        var graph = new lg.LGraph();
+        var source1 = lg.LiteGraph.createNode("test/source");
+        var source2 = lg.LiteGraph.createNode("test/source");
+        var target = lg.LiteGraph.createNode("test/target");
+        graph.add(source1);
+        graph.add(source2);
+        graph.add(target);
+
+        target.inputs[0].allow_multiple = true;
+
+        source1.connect(0, target, 0);
+        source2.connect(0, target, 0);
+
+        // Should not throw and should produce a valid order
+        var order = graph.computeExecutionOrder();
+        expect(order).toBeTruthy();
+        expect(order.length).toBe(3);
+        // Sources should come before target in execution order
+        var targetIndex = order.indexOf(target);
+        var source1Index = order.indexOf(source1);
+        var source2Index = order.indexOf(source2);
+        expect(source1Index).toBeLessThan(targetIndex);
+        expect(source2Index).toBeLessThan(targetIndex);
+    });
+});
